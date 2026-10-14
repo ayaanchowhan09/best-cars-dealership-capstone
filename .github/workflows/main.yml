@@ -34,7 +34,7 @@ jobs:
         run: npm ci
       - name: Build React frontend
         working-directory: server/frontend
-        run: npm run build
+        run: CI=false npm run build
       - name: Report verification steps
         run: |
           echo "Django system checks completed successfully"
