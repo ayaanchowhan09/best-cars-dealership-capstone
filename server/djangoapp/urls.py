@@ -6,6 +6,12 @@ from . import views
 
 app_name = "djangoapp"
 urlpatterns = [
+    # IBM capstone-compatible endpoint names.
+    path(route="fetchReviews/dealer/<int:dealer_id>", view=views.get_dealer_reviews, name="fetch_reviews"),
+    path(route="fetchDealer/<int:dealer_id>", view=views.get_dealer_details, name="fetch_dealer"),
+    path(route="fetchDealers", view=views.get_dealerships, name="fetch_dealers"),
+    path(route="fetchDealers/", view=views.get_dealerships, name="fetch_dealers_slash"),
+    path(route="fetchDealers/<str:state>", view=views.get_dealerships, name="fetch_dealers_by_state"),
     # path for registration
     path(route="register", view=views.registration, name="register"),
     # path for login
