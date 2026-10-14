@@ -1,177 +1,132 @@
-# Uncomment the required imports before adding the code
-# from django.shortcuts import render
-# from django.http import HttpResponseRedirect, HttpResponse
-from django.contrib.auth.models import User
-# from django.shortcuts import get_object_or_404, render, redirect
-from django.contrib.auth import logout
-# from django.contrib import messages
-# from datetime import datetime
+"""Django views for the Best Cars dealership capstone application."""
 
-from django.http import JsonResponse
-from django.contrib.auth import login, authenticate
-import logging
+from __future__ import annotations
+
 import json
+import logging
+
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.models import User
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET
+
+from .localdata import add_review, dealer, dealers, reviews, sentiment
 from .models import CarMake, CarModel
 from .populate import initiate
-from .restapis import get_request, analyze_review_sentiments
-from .restapis import post_review, searchcars_request
 
-# Get an instance of a logger
 logger = logging.getLogger(__name__)
 
 
-# Create your views here.
+def _json_body(request) -> dict:
+    try:
+        return json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return {}
 
 
-# Create a `login_request` view to handle sign in request
 @csrf_exempt
 def login_user(request):
-    # Get username and password from request.POST dictionary
-    data = json.loads(request.body)
-    username = data["userName"]
-    password = data["password"]
-    # Try to check if provide credential can be authenticated
-    user = authenticate(username=username, password=password)
-    data = {"userName": username}
-    if user is not None:
-        # If user is valid, call login method to login current user
-        login(request, user)
-        data = {"userName": username, "status": "Authenticated"}
-    return JsonResponse(data)
+    if request.method != "POST":
+        return JsonResponse({"status": "Method Not Allowed"}, status=405)
+    data = _json_body(request)
+    username = data.get("userName", "").strip()
+    password = data.get("password", "")
+    user = authenticate(request, username=username, password=password)
+    if user is None:
+        return JsonResponse({"userName": username, "status": "Unauthenticated"}, status=401)
+    login(request, user)
+    return JsonResponse({
+        "userName": user.username,
+        "firstName": user.first_name,
+        "lastName": user.last_name,
+        "status": "Authenticated",
+    })
 
 
-# Create a `logout_request` view to handle sign out request
+@require_GET
 def logout_request(request):
     logout(request)
-    data = {"userName": ""}
-    return JsonResponse(data)
+    return JsonResponse({"userName": "", "status": "Logged out"})
 
 
-# Create a `registration` view to handle sign up request
 @csrf_exempt
 def registration(request):
-    # context = {}
-
-    data = json.loads(request.body)
-    username = data["userName"]
-    password = data["password"]
-    first_name = data["firstName"]
-    last_name = data["lastName"]
-    email = data["email"]
-    username_exist = False
-    # email_exist = False
-    try:
-        # Check if user already exists
-        User.objects.get(username=username)
-        username_exist = True
-    except Exception as e:
-        # If not, simply log this is a new user
-        logger.debug("{} is new user".format(username))
-        print(e)
-
-    # If it is a new user
-    if not username_exist:
-        # Create user in auth_user table
-        user = User.objects.create_user(
-            username=username,
-            first_name=first_name,
-            last_name=last_name,
-            password=password,
-            email=email,
-        )
-        # Login the user and redirect to list page
-        login(request, user)
-        data = {"userName": username, "status": "Authenticated"}
-        return JsonResponse(data)
-    else:
-        data = {"userName": username, "error": "Already Registered"}
-        return JsonResponse(data)
+    if request.method != "POST":
+        return JsonResponse({"status": "Method Not Allowed"}, status=405)
+    data = _json_body(request)
+    username = data.get("userName", "").strip()
+    password = data.get("password", "")
+    first_name = data.get("firstName", "").strip()
+    last_name = data.get("lastName", "").strip()
+    email = data.get("email", "").strip()
+    if not all([username, password, first_name, last_name, email]):
+        return JsonResponse({"error": "All fields are required"}, status=400)
+    if User.objects.filter(username=username).exists():
+        return JsonResponse({"userName": username, "error": "Already Registered"}, status=409)
+    user = User.objects.create_user(
+        username=username,
+        first_name=first_name,
+        last_name=last_name,
+        password=password,
+        email=email,
+    )
+    login(request, user)
+    return JsonResponse({
+        "userName": user.username,
+        "firstName": user.first_name,
+        "lastName": user.last_name,
+        "status": "Authenticated",
+    }, status=201)
 
 
 def get_cars(request):
-    count = CarMake.objects.filter().count()
-    print(count)
-    if count == 0:
+    if not CarMake.objects.exists():
         initiate()
-    car_models = CarModel.objects.select_related("car_make")
-    cars = []
-    for car_model in car_models:
-        cars.append({"CarModel": car_model.name,
-                     "CarMake": car_model.car_make.name})
-    return JsonResponse({"CarModels": cars})
+    rows = [
+        {"CarModel": model.name, "CarMake": model.car_make.name, "Year": model.year}
+        for model in CarModel.objects.select_related("car_make").order_by("car_make__name", "name")
+    ]
+    return JsonResponse({"CarModels": rows})
 
 
-# Create `get_dealerships` view
 def get_dealerships(request, state="All"):
-    try:
-        if state == "All":
-            endpoint = "/fetchDealers"
-        else:
-            endpoint = "/fetchDealers/" + state
-        dealerships = get_request(endpoint)
-        return JsonResponse({"status": 200, "dealers": dealerships})
-    except Exception as Http404:
-        return JsonResponse({"status": 404, "mssg": str(Http404)})
+    state = request.GET.get("state", state)
+    return JsonResponse({"status": 200, "dealers": dealers(state)})
 
 
-# Create a `get_dealer_details` view to render the dealer details
 def get_dealer_details(request, dealer_id):
-    if dealer_id:
-        endpoint = "/fetchDealer/" + str(dealer_id)
-        dealership = get_request(endpoint)
-        return JsonResponse({"status": 200, "dealer": dealership})
-    else:
-        return JsonResponse({"status": 400, "message": "Bad Request"})
+    row = dealer(dealer_id)
+    if row is None:
+        return JsonResponse({"status": 404, "message": "Dealer not found"}, status=404)
+    return JsonResponse({"status": 200, "dealer": [row]})
 
 
-# Create a `get_dealer_reviews` view to render the reviews of a dealer
 def get_dealer_reviews(request, dealer_id):
-    # if dealer id has been provided
-    if dealer_id:
-        endpoint = "/fetchReviews/dealer/" + str(dealer_id)
-        reviews = get_request(endpoint)
-        for review_detail in reviews:
-            response = analyze_review_sentiments(review_detail["review"])
-            print(response)
-            review_detail["sentiment"] = response["sentiment"]
-        return JsonResponse({"status": 200, "reviews": reviews})
-    else:
-        return JsonResponse({"status": 400, "message": "Bad Request"})
+    if dealer(dealer_id) is None:
+        return JsonResponse({"status": 404, "message": "Dealer not found"}, status=404)
+    return JsonResponse({"status": 200, "reviews": reviews(dealer_id)})
 
 
-# Create a `add_review` view to submit a review
-def add_review(request):
-    if request.user.is_anonymous is False:
-        data = json.loads(request.body)
-        try:
-            response = post_review(data)
-            return JsonResponse({"status": 200, "message": response})
-        except Exception as e:
-            return JsonResponse({"status": 401,
-                                 "message": "Error in posting review"+e})
-    else:
-        return JsonResponse({"status": 403, "message": "Unauthorized"})
+@csrf_exempt
+def add_review_view(request):
+    if request.method != "POST":
+        return JsonResponse({"status": 405, "message": "POST required"}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({"status": 403, "message": "Unauthorized"}, status=403)
+    data = _json_body(request)
+    required = ["dealership", "review", "purchase_date", "car_make", "car_model", "car_year"]
+    if any(not data.get(key) for key in required):
+        return JsonResponse({"status": 400, "message": "All review details are required"}, status=400)
+    data["name"] = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
+    created = add_review(data)
+    return JsonResponse({"status": 200, "message": created})
 
 
-# Code for the view
 def get_inventory(request, dealer_id):
-    data = request.GET
-    if (dealer_id):
-        if 'year' in data:
-            endpoint = "/carsbyyear/"+str(dealer_id)+"/"+data['year']
-        elif 'make' in data:
-            endpoint = "/carsbymake/"+str(dealer_id)+"/"+data['make']
-        elif 'model' in data:
-            endpoint = "/carsbymodel/"+str(dealer_id)+"/"+data['model']
-        elif 'mileage' in data:
-            endpoint = "/carsbymaxmileage/"+str(dealer_id)+"/"+data['mileage']
-        elif 'price' in data:
-            endpoint = "/carsbyprice/"+str(dealer_id)+"/"+data['price']
-        else:
-            endpoint = "/cars/"+str(dealer_id)
+    return JsonResponse({"status": 200, "cars": []})
 
-        cars = searchcars_request(endpoint)
-        return JsonResponse({"status": 200, "cars": cars})
-    else:
-        return JsonResponse({"status": 400, "message": "Bad Request"})
+
+@require_GET
+def analyze(request, text):
+    return JsonResponse(sentiment(text.replace("+", " ")))

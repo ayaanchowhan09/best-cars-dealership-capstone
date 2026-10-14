@@ -1,5 +1,17 @@
 # Best Cars Dealership Application
 
+**Repository name:** `best-cars-dealership-capstone`
+**Project name:** Best Cars Dealership Application
+
+This repository contains the completed Coursera/IBM Full Stack Cloud Development
+capstone application: a Django and React dealership browser with authentication,
+dealer filtering, reviews, sentiment labels, admin support, and CI verification.
+
+For local verification, run `cd server`, install `requirements.txt`, run
+`python manage.py migrate`, then start `python manage.py runserver`. The included
+sample data is self-contained so the required API and UI flows can be exercised
+without a separate database service.
+
 ![best car dealearship](https://github.com/user-attachments/assets/2e3c4c73-0659-423b-ae6c-7f82f21c0427)
 
 ## Table of Contents
